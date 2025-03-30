@@ -10,6 +10,9 @@ import * as os from "os";
 import * as fs from "fs";
 import * as path from "path";
 import { spawnPromise } from "spawn-rx";
+import { ServerManager } from "./server-manager.mjs";
+
+const serverManager = new ServerManager();
 
 const server = new Server(
   {
@@ -74,6 +77,76 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
           },
           required: ["path"],
+        },
+      },
+      {
+        name: "server_status",
+        description: "Get detailed status of an MCP server",
+        inputSchema: {
+          type: "object",
+          properties: {
+            name: {
+              type: "string",
+              description: "The name of the server to check",
+            },
+          },
+          required: ["name"],
+        },
+      },
+      {
+        name: "server_start",
+        description: "Start an MCP server",
+        inputSchema: {
+          type: "object",
+          properties: {
+            name: {
+              type: "string",
+              description: "The name of the server to start",
+            },
+          },
+          required: ["name"],
+        },
+      },
+      {
+        name: "server_stop",
+        description: "Stop an MCP server",
+        inputSchema: {
+          type: "object",
+          properties: {
+            name: {
+              type: "string",
+              description: "The name of the server to stop",
+            },
+          },
+          required: ["name"],
+        },
+      },
+      {
+        name: "server_metrics",
+        description: "Get detailed metrics for an MCP server",
+        inputSchema: {
+          type: "object",
+          properties: {
+            name: {
+              type: "string",
+              description: "The name of the server to get metrics for",
+            },
+          },
+          required: ["name"],
+        },
+      },
+      {
+        name: "server_health",
+        description: "Check the health of an MCP server",
+        inputSchema: {
+          type: "object",
+          properties: {
+            name: {
+              type: "string",
+              description: "The name of the server to check health for",
+            },
+          },
+          required: ["name"],
         },
       },
     ],
@@ -304,38 +377,60 @@ async function installRepoMcpServer(
 }
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  try {
-    if (request.params.name === "install_repo_mcp_server") {
-      const { name, args, env } = request.params.arguments as {
+  const toolName = request.params.name;
+  const toolInput = request.params.arguments || {};
+
+  switch (toolName) {
+    case "install_repo_mcp_server":
+      const { name: repoName, args, env } = toolInput as {
         name: string;
         args?: string[];
         env?: string[];
       };
 
-      return await installRepoMcpServer(name, args, env);
-    }
+      return await installRepoMcpServer(repoName, args, env);
 
-    if (request.params.name === "install_local_mcp_server") {
-      const dirPath = request.params.arguments!.path as string;
-      const { args, env } = request.params.arguments as {
+    case "install_local_mcp_server":
+      const dirPath = toolInput.path as string;
+      const { args: localArgs, env: localEnv } = toolInput as {
         args?: string[];
         env?: string[];
       };
 
-      return await installLocalMcpServer(dirPath, args, env);
-    }
+      return await installLocalMcpServer(dirPath, localArgs, localEnv);
 
-    throw new Error(`Unknown tool: ${request.params.name}`);
-  } catch (err) {
-    return {
-      content: [
-        {
-          type: "text",
-          text: `Error setting up package: ${err}`,
-        },
-      ],
-      isError: true,
-    };
+    case "server_status":
+      const status = await serverManager.getServerStatus(toolInput.name as string);
+      return {
+        output: status || { error: "Server not found" },
+      };
+
+    case "server_start":
+      const startResult = await serverManager.startServer(toolInput.name as string);
+      return {
+        output: startResult || { error: "Failed to start server" },
+      };
+
+    case "server_stop":
+      const stopResult = await serverManager.stopServer(toolInput.name as string);
+      return {
+        output: { success: stopResult },
+      };
+
+    case "server_metrics":
+      const metrics = await serverManager.getServerMetrics(toolInput.name as string);
+      return {
+        output: metrics || { error: "Failed to get metrics" },
+      };
+
+    case "server_health":
+      const health = await serverManager.checkServerHealth(toolInput.name as string);
+      return {
+        output: health,
+      };
+
+    default:
+      throw new Error(`Unknown tool: ${toolName}`);
   }
 });
 
