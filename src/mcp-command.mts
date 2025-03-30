@@ -13,6 +13,18 @@ interface ServerProcess {
   startTime: number;
 }
 
+interface MCPConfig {
+  mcpServers: {
+    [key: string]: {
+      command: string;
+      args: string[];
+      env?: Record<string, string>;
+      port?: number;
+      lastRun?: string;
+    };
+  };
+}
+
 export class MCPCommand implements IMCPCommand {
   private configPath: string;
   private processStorePath: string;
@@ -26,9 +38,10 @@ export class MCPCommand implements IMCPCommand {
     this.processStorePath = path.join(basePath, 'mcp_processes.json');
   }
 
-  private async loadConfig(): Promise<any> {
+  private async loadConfig(): Promise<MCPConfig> {
     try {
-      return JSON.parse(await fs.promises.readFile(this.configPath, 'utf8'));
+      const config = JSON.parse(fs.readFileSync(this.configPath, 'utf8'));
+      return config;
     } catch (e) {
       return { mcpServers: {} };
     }
@@ -127,6 +140,31 @@ export class MCPCommand implements IMCPCommand {
       case 'list':
         await this.list();
         break;
+      case 'start-all':
+        await this.startAll();
+        break;
+      case 'stop-all':
+        await this.stopAll();
+        break;
+      case 'clean-stopped-servers':
+        await this.cleanStoppedServers();
+        break;
+      case 'update-cursor-config':
+        if (!serverName) {
+          console.error('Server names are required for update-cursor-config command');
+          this.printUsage();
+          return;
+        }
+        await this.updateCursorConfig(serverName.split(','));
+        break;
+      case 'update-claude-config':
+        if (!serverName) {
+          console.error('Server names are required for update-claude-config command');
+          this.printUsage();
+          return;
+        }
+        await this.updateClaudeConfig(serverName.split(','));
+        break;
       default:
         console.error(`Unknown command: ${command}`);
         this.printUsage();
@@ -148,6 +186,11 @@ Commands:
   restart <server>  Restart a server
   logs <server>     Show server logs
   list             List all installed servers
+  start-all        Start all servers
+  stop-all         Stop all servers
+  clean-stopped-servers Clean up stopped servers
+  update-cursor-config <server1,server2,...> Update cursor configuration for specified servers
+  update-claude-config <server1,server2,...> Update Claude Desktop configuration for specified servers
     `);
   }
 
@@ -359,6 +402,122 @@ Last Run: ${serverConfig.lastRun || 'Never'}
     } catch {
       return 'NOT_RESPONDING';
     }
+  }
+
+  async startAll(): Promise<void> {
+    const config = await this.loadConfig();
+    const servers = Object.keys(config.mcpServers || {});
+    
+    for (const server of servers) {
+      try {
+        await this.start(server);
+        console.log(`Started server: ${server}`);
+      } catch (e) {
+        console.error(`Failed to start server ${server}:`, e);
+      }
+    }
+  }
+
+  async stopAll(): Promise<void> {
+    const config = await this.loadConfig();
+    const servers = Object.keys(config.mcpServers || {});
+    
+    for (const server of servers) {
+      try {
+        await this.stop(server);
+        console.log(`Stopped server: ${server}`);
+      } catch (e) {
+        console.error(`Failed to stop server ${server}:`, e);
+      }
+    }
+  }
+
+  async cleanStoppedServers(): Promise<void> {
+    const config = await this.loadConfig();
+    const processes = await this.loadProcessStore();
+    const servers = Object.keys(config.mcpServers || {});
+    
+    for (const server of servers) {
+      const isRunning = await this.isServerRunning(server);
+      if (!isRunning) {
+        const serverConfig = config.mcpServers[server];
+        const installDir = path.dirname(serverConfig.args[0]);
+        
+        try {
+          // Remove server directory
+          if (fs.existsSync(installDir)) {
+            fs.rmSync(installDir, { recursive: true, force: true });
+          }
+          
+          // Remove from config
+          delete config.mcpServers[server];
+          const updatedProcesses = processes.filter(p => p.serverName !== server);
+          await this.saveProcessStore(updatedProcesses);
+          
+          console.log(`Cleaned up stopped server: ${server}`);
+        } catch (e) {
+          console.error(`Failed to clean up server ${server}:`, e);
+        }
+      }
+    }
+    
+    // Save updated config and processes
+    await this.saveConfig(config);
+    await this.saveProcessStore(processes);
+  }
+
+  async updateCursorConfig(servers: string[]): Promise<void> {
+    const config = await this.loadConfig();
+    const cursorConfig: MCPConfig = {
+      mcpServers: {}
+    };
+    
+    // If 'all-servers' is specified, use all available servers
+    if (servers.length === 1 && servers[0] === 'all-servers') {
+      cursorConfig.mcpServers = { ...config.mcpServers };
+    } else {
+      for (const server of servers) {
+        if (config.mcpServers[server]) {
+          cursorConfig.mcpServers[server] = config.mcpServers[server];
+        }
+      }
+    }
+    
+    const cursorConfigPath = process.platform === 'win32'
+      ? path.join(os.homedir(), '.cursor', 'mcp.json')
+      : path.join(os.homedir(), '.cursor', 'mcp.json');
+    
+    fs.writeFileSync(cursorConfigPath, JSON.stringify(cursorConfig, null, 2));
+    console.log('Updated Cursor configuration');
+  }
+
+  async updateClaudeConfig(servers: string[]): Promise<void> {
+    const config = await this.loadConfig();
+    const claudeConfig: MCPConfig = {
+      mcpServers: {}
+    };
+    
+    // If 'all-servers' is specified, use all available servers
+    if (servers.length === 1 && servers[0] === 'all-servers') {
+      claudeConfig.mcpServers = { ...config.mcpServers };
+    } else {
+      for (const server of servers) {
+        if (config.mcpServers[server]) {
+          claudeConfig.mcpServers[server] = config.mcpServers[server];
+        }
+      }
+    }
+    
+    const claudeConfigPath = process.platform === 'win32'
+      ? path.join(os.homedir(), 'AppData', 'Roaming', 'Claude', 'claude_desktop_config.json')
+      : path.join(os.homedir(), 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json');
+    
+    fs.writeFileSync(claudeConfigPath, JSON.stringify(claudeConfig, null, 2));
+    console.log('Updated Claude Desktop configuration');
+  }
+
+  private async saveConfig(config: MCPConfig): Promise<void> {
+    fs.writeFileSync(this.configPath, JSON.stringify(config, null, 2));
   }
 }
 

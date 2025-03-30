@@ -14,6 +14,24 @@ interface ServerProcess {
   startTime: Date;
 }
 
+interface ServerNotification {
+  type: 'info' | 'warning' | 'error';
+  message: string;
+  timestamp: string;
+  serverName?: string;
+}
+
+interface ServerPreferences {
+  installationDir: string;
+  askForCustomPort: boolean;
+  lastUpdated: string;
+  notifications: {
+    enabled: boolean;
+    maxHistory: number;
+    types: ('info' | 'warning' | 'error')[];
+  };
+}
+
 interface ServerConfig {
   command: string;
   args: string[];
@@ -28,14 +46,31 @@ export class ServerManager {
   private configPath: string;
   private servers: Map<string, ServerProcess>;
   private configCache: Record<string, ServerConfig>;
+  private preferencesPath: string;
+  private preferences: ServerPreferences;
+  private notificationsPath: string;
+  private notifications: ServerNotification[];
 
   constructor() {
     this.configPath = process.platform === 'win32'
       ? path.join(os.homedir(), 'AppData', 'Roaming', 'Claude', 'claude_desktop_config.json')
       : path.join(os.homedir(), 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json');
     
+    // Create conf directory if it doesn't exist
+    const confDir = path.join(__dirname, '..', 'conf');
+    if (!fs.existsSync(confDir)) {
+      fs.mkdirSync(confDir, { recursive: true });
+    }
+    this.preferencesPath = path.join(confDir, 'mcp_preferences.json');
+    
+    this.notificationsPath = process.platform === 'win32'
+      ? path.join(os.homedir(), 'AppData', 'Roaming', 'Claude', 'mcp_notifications.json')
+      : path.join(os.homedir(), 'Library', 'Application Support', 'Claude', 'mcp_notifications.json');
+    
     this.servers = new Map();
     this.configCache = this.loadConfig();
+    this.preferences = this.loadPreferences();
+    this.notifications = this.loadNotifications();
   }
 
   private loadConfig(): Record<string, ServerConfig> {
@@ -52,6 +87,98 @@ export class ServerManager {
     fullConfig.mcpServers = config;
     fs.writeFileSync(this.configPath, JSON.stringify(fullConfig, null, 2));
     this.configCache = config;
+  }
+
+  private loadNotifications(): ServerNotification[] {
+    try {
+      if (fs.existsSync(this.notificationsPath)) {
+        return JSON.parse(fs.readFileSync(this.notificationsPath, 'utf8'));
+      }
+    } catch (e) {
+      console.warn('Failed to load notifications:', e);
+    }
+    return [];
+  }
+
+  private saveNotifications() {
+    try {
+      fs.writeFileSync(this.notificationsPath, JSON.stringify(this.notifications, null, 2));
+    } catch (e) {
+      console.error('Failed to save notifications:', e);
+    }
+  }
+
+  private addNotification(type: 'info' | 'warning' | 'error', message: string, serverName?: string) {
+    if (!this.preferences.notifications.enabled) return;
+    if (!this.preferences.notifications.types.includes(type)) return;
+
+    const notification: ServerNotification = {
+      type,
+      message,
+      timestamp: new Date().toISOString(),
+      serverName
+    };
+
+    this.notifications.unshift(notification);
+    
+    // Trim history if needed
+    if (this.notifications.length > this.preferences.notifications.maxHistory) {
+      this.notifications = this.notifications.slice(0, this.preferences.notifications.maxHistory);
+    }
+
+    this.saveNotifications();
+  }
+
+  getNotifications(limit?: number): ServerNotification[] {
+    return limit ? this.notifications.slice(0, limit) : this.notifications;
+  }
+
+  clearNotifications() {
+    this.notifications = [];
+    this.saveNotifications();
+  }
+
+  private loadPreferences(): ServerPreferences {
+    try {
+      if (fs.existsSync(this.preferencesPath)) {
+        return JSON.parse(fs.readFileSync(this.preferencesPath, 'utf8'));
+      }
+    } catch (e) {
+      console.warn('Failed to load preferences:', e);
+    }
+    
+    // Default preferences
+    return {
+      installationDir: path.join(os.homedir(), 'mcp-servers'),
+      askForCustomPort: true,
+      lastUpdated: new Date().toISOString(),
+      notifications: {
+        enabled: true,
+        maxHistory: 100,
+        types: ['warning', 'error']
+      }
+    };
+  }
+
+  private savePreferences() {
+    try {
+      fs.writeFileSync(this.preferencesPath, JSON.stringify(this.preferences, null, 2));
+    } catch (e) {
+      console.error('Failed to save preferences:', e);
+    }
+  }
+
+  async updatePreferences(newPrefs: Partial<ServerPreferences>) {
+    this.preferences = {
+      ...this.preferences,
+      ...newPrefs,
+      lastUpdated: new Date().toISOString()
+    };
+    this.savePreferences();
+  }
+
+  getPreferences(): ServerPreferences {
+    return { ...this.preferences };
   }
 
   async updateServerConfig(serverName: string, config: Partial<ServerConfig>): Promise<void> {
@@ -103,11 +230,17 @@ export class ServerManager {
 
   async startServer(serverName: string): Promise<ServerProcess | null> {
     const config = this.configCache[serverName];
-    if (!config) throw new Error(`Server ${serverName} not found in configuration`);
+    if (!config) {
+      this.addNotification('error', `Server ${serverName} not found in configuration`, serverName);
+      throw new Error(`Server ${serverName} not found in configuration`);
+    }
 
     // Check if server is already running
     const existing = await this.getServerStatus(serverName);
-    if (existing) return existing;
+    if (existing) {
+      this.addNotification('warning', `Server ${serverName} is already running`, serverName);
+      return existing;
+    }
 
     try {
       const child = await spawnPromise(config.command, config.args, {
@@ -117,6 +250,7 @@ export class ServerManager {
       }) as unknown as ChildProcess;
 
       if (!child.pid) {
+        this.addNotification('error', `Failed to get process ID for ${serverName}`, serverName);
         throw new Error('Failed to get process ID');
       }
 
@@ -131,6 +265,7 @@ export class ServerManager {
       };
 
       this.servers.set(serverName, serverProcess);
+      this.addNotification('info', `Server ${serverName} started successfully`, serverName);
 
       // Update last run time in config
       await this.updateServerConfig(serverName, {
@@ -140,6 +275,7 @@ export class ServerManager {
 
       return serverProcess;
     } catch (e) {
+      this.addNotification('error', `Failed to start server ${serverName}: ${e.message}`, serverName);
       console.error(`Failed to start server ${serverName}:`, e);
       return null;
     }

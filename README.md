@@ -8,7 +8,24 @@ This server is a server that installs other MCP servers for you. Install it, and
 
 ### 1. Configuration Setup
 
+#### Claude Desktop Configuration
 Put this into your `claude_desktop_config.json` (either at `~/Library/Application Support/Claude` on macOS or `C:\Users\NAME\AppData\Roaming\Claude` on Windows):
+
+```json
+{
+  "mcpServers": {
+    "mcp-installer": {
+      "command": "npx",
+      "args": [
+        "@anaisbetts/mcp-installer"
+      ]
+    }
+  }
+}
+```
+
+#### Cursor Configuration
+Put this into your `~/.cursor/mcp.json` (this file will be created automatically when you use `mcpctl update-cursor-config`, but you can also create it manually):
 
 ```json
 {
@@ -27,6 +44,9 @@ Put this into your `claude_desktop_config.json` (either at `~/Library/Applicatio
 
 ```bash
 npm install -g @mcp/installer
+
+# After installation, update Cursor configuration:
+mcpctl update-cursor-config mcp-installer
 ```
 
 ## Command Line Usage
@@ -41,100 +61,75 @@ mcpctl list
 
 # Check server status
 mcpctl status [server-name]    # Show status of specific server or all servers
+mcpctl status-all             # Show detailed status of all servers
 
 # Server Control
 mcpctl start <server-name>     # Start a server
 mcpctl stop <server-name>      # Stop a server
 mcpctl restart <server-name>   # Restart a server
+mcpctl start-all              # Start all installed servers
+mcpctl stop-all               # Stop all running servers
+
+# Server Management
+mcpctl clean-stopped-servers  # Remove stopped servers and their files
+mcpctl update-cursor-config <server1,server2,...>  # Update Cursor config with specified servers
+mcpctl update-cursor-config all-servers  # Update Cursor config with all installed servers
+mcpctl update-claude-config <server1,server2,...>  # Update Claude Desktop config with specified servers
+mcpctl update-claude-config all-servers  # Update Claude Desktop config with all installed servers
 
 # Monitoring
 mcpctl logs <server-name>      # View server logs and process information
 ```
 
-### Command Details
+### First Run Setup
 
-#### List Command
-```bash
-mcpctl list
-```
-Shows all installed MCP servers with their current status and PID (if running).
+On first run, the installer will ask for your preferences:
 
-Output example:
-```
-Installed MCP Servers:
-- browserbase (STOPPED)
-- wordpress (RUNNING) [PID: 12345]
-- filesystem (STOPPED)
-```
+1. Installation Directory: Where to install all MCP servers
+2. Port Configuration: Whether to ask for custom ports when installing new servers
 
-#### Status Command
-```bash
-mcpctl status [server-name]
-```
-Displays detailed information about a server or all servers, including:
-- Running status
-- Health status
-- Process ID (PID)
-- Command configuration
-- Resource usage (CPU and memory)
+These preferences are saved and remembered for future installations. You can update them anytime by editing:
+- macOS: `~/Library/Application Support/Claude/mcp_preferences.json`
+- Windows: `%APPDATA%\Claude\mcp_preferences.json`
 
-Output example:
-```
-Server: wordpress
-Status: RUNNING
-Health: OK (CPU: 2.1%, MEM: 1.4%)
-PID: 12345
-Command: node server.js
-```
+### Server Installation
 
-#### Start Command
-```bash
-mcpctl start <server-name>
-```
-Starts the specified server and displays its PID. The command will:
-- Check if the server is already running
-- Start the server in detached mode
-- Store process information
-- Perform initial health check
+When installing a new server, the installer will:
+1. Check if a server with the same name exists
+2. If it exists and is stopped, ask if you want to overwrite it
+3. If custom ports are enabled, ask for a port number
+4. Install the server in your preferred installation directory
+5. Automatically update both Claude Desktop and Cursor configurations
 
-#### Stop Command
-```bash
-mcpctl stop <server-name>
-```
-Gracefully stops the specified server and cleans up process information.
-
-#### Restart Command
-```bash
-mcpctl restart <server-name>
-```
-Performs a full server restart by:
-1. Stopping the server
-2. Waiting for cleanup
-3. Starting the server again
-
-#### Logs Command
-```bash
-mcpctl logs <server-name>
-```
-Shows process information and logs for the specified server.
+> Note: After installing new servers, you can sync them to your IDE configurations using:
+> ```bash
+> # For Cursor:
+> mcpctl update-cursor-config server1,server2,...
+> 
+> # For Claude Desktop:
+> mcpctl update-claude-config server1,server2,...
+> ```
+> This will update the respective configuration files with the server configurations.
 
 ### Example Usage
 
 ```bash
-# Start the WordPress MCP server
-mcpctl start wordpress
+# Start all servers
+mcpctl start-all
 
-# Check its status
-mcpctl status wordpress
+# Check status of all servers
+mcpctl status-all
 
-# View its logs
-mcpctl logs wordpress
+# Clean up stopped servers
+mcpctl clean-stopped-servers
 
-# Restart if needed
-mcpctl restart wordpress
+# Update IDE configurations with specific servers
+mcpctl update-cursor-config browserbase,filesystem,hyperbrowser
+mcpctl update-claude-config browserbase,filesystem,hyperbrowser
 
-# Stop when done
-mcpctl stop wordpress
+# Update IDE configurations with all installed servers
+mcpctl update-cursor-config all-servers
+mcpctl update-claude-config all-servers
 ```
 
 ### Example prompts for Claude
@@ -166,7 +161,7 @@ mcpctl stop wordpress
 
 ## Contributing
 
-For development and contribution guidelines, please see our [Contributing Guide](CONTRIBUTING.md).
+For development and contribution guidelines, please see our [Contributing Guide](CONTRIBUTING.md) and [Development Documentation](DEVDOC.md).
 
 ## License
 
