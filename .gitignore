@@ -94,3 +94,9 @@ test-suite/reports/
 test-suite/**/*.log
 test-suite/temp/
 test-suite/.nyc_output/
+
+# Development files
+DEVDOC.md
+package-lock.json
+tsc/
+tsc
