@@ -98,5 +98,7 @@ test-suite/.nyc_output/
 # Development files
 DEVDOC.md
 package-lock.json
-tsc/
+
+# TypeScript compiler output
 tsc
+*.tsbuildinfo
