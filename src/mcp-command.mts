@@ -13,16 +13,16 @@ interface ServerProcess {
   startTime: number;
 }
 
+interface ServerConfig {
+  command: string;
+  args: string[];
+  env?: Record<string, string>;
+  port?: number;
+  lastRun?: string;
+}
+
 interface MCPConfig {
-  mcpServers: {
-    [key: string]: {
-      command: string;
-      args: string[];
-      env?: Record<string, string>;
-      port?: number;
-      lastRun?: string;
-    };
-  };
+  mcpServers: Record<string, ServerConfig>;
 }
 
 export class MCPCommand implements IMCPCommand {
